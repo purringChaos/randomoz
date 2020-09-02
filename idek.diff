@@ -1,0 +1,156 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4090783..3dbf46a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -1,19 +1,39 @@
+ cmake_minimum_required(VERSION 3.15)
+ project(pinetime-freertos C ASM)
++# define some variables just for this example to determine file locations
+ 
+-set(NRF_TARGET "nrf52")
++set(NRF5_TARGET "nrf52832")
++set(NRF5_SOFTDEVICE_VARIANT "s132")
++set(NRF5_PROJECT_NAME pinetime-freertos)
++set(NRF5_BOARD pca10040)
++set(NRF5_LINKER_SCRIPT gcc_nrf52.ld)
++set(CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
++include("nrf5")
+ 
+-if (NOT ARM_NONE_EABI_TOOLCHAIN_PATH)
+-  message(FATAL_ERROR "The path to the toolchain (arm-non-eabi) must be specified on the command line (add -DARM_NONE_EABI_TOOLCHAIN_PATH=<path>")
+-endif ()
++include_directories(src)
++list(APPEND SOURCE_FILES src/main.c src/port.c src/port_cmsis.c src/port_cmsis_systick.c)
+ 
+-if (NOT NRF5_SDK_PATH)
+-  message(FATAL_ERROR "The path to the NRF52 SDK must be specified on the command line (add -DNRF52_SDK_PATH=<path>")
+-endif ()
+-
+-if (NOT NRFJPROG)
+-  message(FATAL_ERROR "the path to the tool nrfjprog must be specified on the command line (add -DNRFJPROG=<path>")
+-endif ()
+-
+-include("cmake-nRF5x/CMake_nRF5x.cmake")
+-add_subdirectory(src)
++ADD_DEFINITIONS(-DNRF_SDH_SOC_ENABLED)
++ADD_DEFINITIONS(-DNRF_SDH_ENABLED)
++add_executable(pinetime-freertos "${SOURCE_FILES}")
++nrf5_target(${CMAKE_PROJECT_NAME})
++target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE
++  nrf5_nrfx_common
++  nrf5_delay
++  nrf5_boards
++  nrf5_ext_freertos
++  nrf5_soc
++  nrf5_bsp
++  nrf5_log
++nrf5_drv_clock
++nrf5_log_backend_serial
++nrf5_nrfx_clock
++nrf5_app_error
++nrf5_memobj
++nrf5_app_scheduler
++nrf5_atomic
++nrf5_app_util_platform
++nrf5_balloc
++nrf5_sdh
++nrf5_section
++)
+diff --git a/cmake-nRF5x b/cmake-nRF5x
+deleted file mode 160000
+index 801e81d..0000000
+--- a/cmake-nRF5x
++++ /dev/null
+@@ -1 +0,0 @@
+-Subproject commit 801e81d36ad4e367d85732e7808ff5a46e776f5b
+diff --git a/gcc_nrf52.ld b/gcc_nrf52.ld
+index 8d4cf90..9914de7 100644
+--- a/gcc_nrf52.ld
++++ b/gcc_nrf52.ld
+@@ -57,7 +57,36 @@ SECTIONS
+     KEEP(*(.nrf_balloc))
+     PROVIDE(__stop_nrf_balloc = .);
+   } > FLASH
+-
++  .sdh_stack_observers :
++  {
++    PROVIDE(__start_sdh_stack_observers = .);
++    KEEP(*(SORT(.sdh_stack_observers*)))
++    PROVIDE(__stop_sdh_stack_observers = .);
++  } > FLASH
++  .sdh_soc_observers :
++  {
++    PROVIDE(__start_sdh_soc_observers = .);
++    KEEP(*(SORT(.sdh_soc_observers*)))
++    PROVIDE(__stop_sdh_soc_observers = .);
++  } > FLASH
++  .sdh_ble_observers :
++  {
++    PROVIDE(__start_sdh_ble_observers = .);
++    KEEP(*(SORT(.sdh_ble_observers*)))
++    PROVIDE(__stop_sdh_ble_observers = .);
++  } > FLASH
++  .sdh_req_observers :
++  {
++    PROVIDE(__start_sdh_req_observers = .);
++    KEEP(*(SORT(.sdh_req_observers*)))
++    PROVIDE(__stop_sdh_req_observers = .);
++  } > FLASH
++  .sdh_state_observers :
++  {
++    PROVIDE(__start_sdh_state_observers = .);
++    KEEP(*(SORT(.sdh_state_observers*)))
++    PROVIDE(__stop_sdh_state_observers = .);
++  } > FLASH
+ } INSERT AFTER .text
+ 
+ 
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+deleted file mode 100644
+index 2b25bd7..0000000
+--- a/src/CMakeLists.txt
++++ /dev/null
+@@ -1,28 +0,0 @@
+-cmake_minimum_required(VERSION 3.12)
+-
+-project(pinetime-freertos-example C ASM)
+-
+-# define some variables just for this example to determine file locations
+-set(NRF_PROJECT_NAME pinetime-freertos-example)
+-set(NRF_BOARD pca10040)
+-#set(NRF_SOFTDEVICE s132)
+-
+-nRF5x_toolchainSetup()
+-nRF5x_setup()
+-
+-#nRF5x_addAppScheduler()
+-#nRF5x_addAppFIFO()
+-#nRF5x_addAppTimer()
+-#nRF5x_addAppUART()
+-nRF5x_addAppButton()
+-nRF5x_addBSP(FALSE FALSE FALSE)
+-#nRF5x_addBLEGATT()
+-#
+-#nRF5x_addBLEService(ble_lbs)
+-
+-add_definitions(-DCONFIG_GPIO_AS_PINRESET)
+-
+-include_directories(.)
+-list(APPEND SOURCE_FILES main.c)
+-
+-nRF5x_addExecutable(pinetime-freertos-example "${SOURCE_FILES}")
+diff --git a/src/main.c b/src/main.c
+index a7a1d21..ed5a1df 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -60,8 +60,8 @@
+ #include "sdk_errors.h"
+ #include "app_error.h"
+ #include <nrfx_log.h>
+-#include <libraries/log/nrf_log_ctrl.h>
+-#include <libraries/log/nrf_log_default_backends.h>
++#include <nrf_log_ctrl_internal.h>
++#include <nrf_log_backend_serial.h>
+ 
+ #if LEDS_NUMBER <= 2
+ #error "Board is not equipped with enough amount of LEDs"
